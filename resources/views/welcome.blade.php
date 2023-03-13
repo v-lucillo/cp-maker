@@ -51,9 +51,9 @@
         }
         textarea.spots{
             width: 642px;
-            font-size: 12px;
+            font-size: 9.7px;
             font-family: courier, courier new, serif;
-            height: 22px;
+            height: 10px;
         }
 
         textarea.version{
@@ -108,7 +108,7 @@
                     </tr>
                     <tr>
                         <td width="60%"><b>A. E.</b>: <input style="width: 343px" type="text" name="{{rand(100000,999999)}}" value="{{$content['ae']}}"></td>
-                        <td><b>Broadcast Order #</b>: <input style="width: 140px" type="text" name="{{rand(100000,999999)}}" value="{{$content['brod_no']}}"></td>
+                        <td><b>B.O #</b>: <input style="width: 214px" type="text" name="{{rand(100000,999999)}}" value="{{$content['brod_no']}}"></td>
                     </tr>
                 </table>
             </div>
@@ -121,22 +121,30 @@
                     $spots = $content["spots"];
                     $key_date = 0;
                 ?>
-
-                <!--  tang ina array kasi tong $spot na to ehhn, for improvement, palitan yung data struct -->
+                
                 @foreach($spots as $spot)
-                    @foreach($spot as $key => $value)
-                        @if($key_date != $key)
+                    @if($spot == "" || $spot == null)
+                        @continue
+                    @endif
+                    @if(!preg_match("/^[0-9]{1,2}:/", $spot))
+                    <?php  
+                        $data = explode("  ", $spot);
+                        $id = $data[0];
+                        unset($data[0]);
+                        $spot = implode("  ", $data);
+                    ?>
+                        <div style="margin-top: -5px">
                             <span>
-                                <b style="font-size: 12px;">{{str_pad($key, 2, '0', STR_PAD_LEFT)}}</b>
+                            <b style="font-size: 9px;">{{str_pad($id, 2, '0', STR_PAD_LEFT)}}</b>
                             </span>
-                            <textarea class = "spots" rows = '1' name="field_{{rand(100000,999999)}}">{{$value}}</textarea>
-                        @else
-                            <div style="margin-left: 23px; margin-top: 3px ">
-                                <textarea class = "spots" rows = '1' name="field_{{rand(100000,999999)}}">{{$value}}</textarea>
-                            </div>
-                        @endif
-                        <?php $key_date = $key;?>
-                    @endforeach
+                            <textarea class = "spots" rows = '1' name="field_{{rand(100000,999999)}}">  {{$spot}}
+                            </textarea>
+                        </div>
+                    @else
+                        <div style="margin-left: 20px; margin-top: 0px ">
+                            <textarea class = "spots" rows = '1' name="field_{{rand(100000,999999)}}">{{$spot}}</textarea>
+                        </div>
+                    @endif
                 @endforeach
 
                 @if(isset($content["version"]))
@@ -166,14 +174,14 @@
             <table class="authorization">
                 <tr>
                     <td width="50%">
-                        <img style="float: left; margin: 0 0 -38px 0" src="{{$jenelle_sig}}" width="150px">
-                        <p><u>Jenelle R. Gomez</u></p>
+                        <img style="float: left; margin: 0 0 -38px 0" src="{{$userdata->signature}}" width="150px">
+                        <p><u>{{$userdata->fullname}}</u></p>
                         <p>CRM Analyst</p>
                     </td>
                     <td>
-                        <img style="float: left; margin: 0 0 -25px -60px" src="{{$vic_sig}}" width="60px">
+                        <img style="float: left; margin: 0 0 -25px -60px" src="{{$userdata->signatory_signature}}" width="60px">
                         <img style="float: left; margin: 0 -70px -25px 10px" src="{{$jen_sig}}" width="60px">
-                        <p><u>Marivic Ferrer / Jennifer Lubi</u></p>
+                        <p><u>{{$userdata->signatory_fullname}} / Jennifer Lubi</u></p>
                         <p>Team Lead / CRM Head</p>
                     </td>
                 </tr>

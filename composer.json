@@ -15,6 +15,7 @@
         "guzzlehttp/guzzle": "^6.3",
         "laravel/framework": "^7.0",
         "laravel/tinker": "^2.0",
+        "nao-pon/flysystem-google-drive": "~1.1",
         "niklasravnsborg/laravel-pdf": "^4.1",
         "phpoffice/phpword": "^1.0",
         "smalot/pdfparser": "^2.3"

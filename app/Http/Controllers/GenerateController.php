@@ -8,32 +8,56 @@ use File;
 use PDF;
 use Storage;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Validation\ValidationException;
+use Throwable;
+use App\Exceptions\Handler;
 
 class GenerateController extends Controller
-{
-    public function index(){
-        return view("main");
+{  
+    public function main(){
+        $userdata = session("user_data");
+        $data = [];
+        $user_preview_format =  $userdata->preview_format;
+        if($user_preview_format){
+            $data["preview_format_label"] = "WORK BOOK FORMAT";
+            $data["preview_attr"] = "checked";
+        }else{
+            $data["preview_format_label"] = "TEXT AREA FORMAT";
+            $data["preview_attr"] = "";
+        }
+        return view("main",compact('data'));
     }
 
     public function preview(){
+        $userdata = session("user_data");
+        $user_preview_format =  $userdata->preview_format;
         $cps = $this->format_data_feed();
-        return view('preview', compact('cps'));
+        if($user_preview_format){
+            $page =  "preview";
+        }else{
+            $page =  "preview_textarea";
+        }
+        return view($page, compact('cps'));
     }
 
     public function get_generated_files(){
-        $dir = public_path("cp_output");
-        $output_file = array_map(function($data){
-            return asset("cp_output")."/$data";
+        $userdata = session("user_data");
+        $username = $userdata->username;
+        $dir = public_path("cp_output\\$username");
+        $output_file = array_map(function($data) use ($username){
+            return asset("cp_output/$username")."/$data";
         },array_slice(scandir($dir), 2));
         return response()->json($output_file);
     }
 
     public function upload_cp(Request $request){
-        $this->deleteAllfileDIR("cp");
+        $userdata = session("user_data");
+        $username = $userdata->username;
+        $this->deleteAllfileDIR("cp/$username");
         $files = $request->file("file");
         foreach ($files as $key => $file) {
             $file_name =  $file->getClientOriginalName();
-            $file->move(public_path("cp"), $file_name);
+            $file->move(public_path("cp/$username"), $file_name);
         }
     }
 
@@ -43,17 +67,20 @@ class GenerateController extends Controller
     }
 
     private function format_data_feed(){
+        $userdata = session("user_data");
+        $username = $userdata->username;
         $result = [];
         $parser = new \Smalot\PdfParser\Parser(); 
-        $dir = public_path("cp");
-        $file = array_slice(scandir(public_path("cp")), 2);
+        $dir = public_path("cp/$username");
+        $file = array_slice(scandir(public_path("cp/$username")), 2);
         $cp = [];
         foreach ($file as $cps_file) {
-            $cp_file =  $dir."\\".$cps_file; // this is a sigle file CP
+            $cp_file =  $dir."\\".$cps_file; // a sigle CP file
             $pdf = $parser->parseFile($cp_file); 
             $pdf_content = ($pdf->getText()); 
             $pdf_content_to_array = explode("\n", $pdf_content);
-            
+            // dd($pdf_content_to_array);
+
             $letter_of_codes =  array_filter($pdf_content_to_array, function($d){
                 return strstr($d, "Letter Codes");
             });
@@ -64,7 +91,7 @@ class GenerateController extends Controller
                 return strstr($d, "Agency :");
             });
             $month_year =  array_filter($pdf_content_to_array, function($d){
-                return strstr($d,"Month / Y ear") ||strstr($d,"Month / Year");
+                return strstr($d,"Month / Y ear") || strstr($d,"Month / Year") || strstr($d,"Month");
             });
             $station =  array_filter($pdf_content_to_array, function($d){
                 return strstr($d,"Station");
@@ -108,28 +135,48 @@ class GenerateController extends Controller
                     }
                 }
             }
-            $spots =  array_filter($pdf_content_to_array, function($d){
 
+            $spots =  array_filter($pdf_content_to_array, function($d) use ($version){
                 if(preg_match("/^[0-9]{2}:/", $d)){
-                    return $d;
+                    $d = array_filter(explode("\t", $d));
+                    sort($d);
+                    $sd = implode("  ", $d);
+                    return $sd;
                 }
 
                 if(preg_match("/^[0-9]{2}/", $d) && substr($d,2,1) == "\t"){
+                    $holder = $d;
+                    $d = array_filter(explode("\t", substr($d."\t", 3)));
+                    if($d == null || sizeof($d) == 0){
+                        return $holder;
+                    }
+                    sort($d);
+                    $d = implode("  ", $d);
                     return $d;
                 }
-                
+                if(sizeof($version) >= 1){  // condition added for Jelyns case 18292-PEERLESS-CORPORATE-IM10072335-PEERLESS-CORPORATE-PO-2023-01-RHTV (1)
+                    return strstr($d,"VERSION");
+                }
             });
 
             $spot_group = [];
             $spot_set = [];
-            // dd($spots);
             foreach ($spots as $key => $value) {
                 if(preg_match("/^[0-9]{2}:/", $value)){
-                    $spot_group[array_key_last($spot_group)] = $spot_group[array_key_last($spot_group)].$value."\t";
+                    try {
+                        $spot_group[array_key_last($spot_group)] = $spot_group[array_key_last($spot_group)].$value."\t";
+                    } catch (\Exception $e) {
+                        // dito na stack si Arriane
+                    }
                     if((int)$key == (int)array_key_last($spots)){
                        array_push($spot_set,$spot_group);
                     }
                     continue;
+                }
+
+                if(strstr($value, "VERSION")){
+                    array_push($spot_set,$spot_group);
+                    $spot_group = [];
                 }
 
                 if(preg_match("/^[0-9]{2}/", $value) && substr($value,2,1) == "\t"){
@@ -152,6 +199,7 @@ class GenerateController extends Controller
                 }
             }
 
+            
             $version = array_values($version);
             $letter_of_codes = array_values($letter_of_codes);
 
@@ -193,71 +241,113 @@ class GenerateController extends Controller
             $contract_num = array_values(array_map(function($d){
                 return str_replace("Contract No. :", "", $d);
             },$contract_num));
-            
+            $spot_set = array_values(array_filter($spot_set));
 
-
-            for($i = 0; $i < sizeof($spot_set); $i++){
-                array_push($cp, [
-                    "version" => $version[$i],
-                    "letter_of_codes" => $letter_of_codes[$i],
-                    "advertiser" => $advertiser[$i],
-                    "agency" => $agency[$i],
-                    "month_year" => $month_year[$i],
-                    "station" => $station[$i],
-                    "ae" => $ae[$i],
-                    "date" => $date[$i],
-                    "product" => $product[$i],
-                    "com_len" => $com_len[$i],
-                    "brod_no" => $brod_no[$i],
-                    "contract_num" => $contract_num[$i],
-                    "spots" => $spot_set[$i],
-                ]);
+            try {
+                $spot_set =  $this->re_index_spots($spots);
+                // array_push($spot_set, ["name" => "Victorino I"]);
+                for($i = 0; $i < sizeof($spot_set); $i++){
+                    array_push($cp, [
+                        "version" => $version[$i],
+                        "letter_of_codes" => $letter_of_codes[$i],
+                        "advertiser" => $advertiser[$i],
+                        "agency" => $agency[$i],
+                        "month_year" => $month_year[$i],
+                        "station" => $station[$i],
+                        "ae" => $ae[$i],
+                        "date" => $date[$i],
+                        "product" => $product[$i],
+                        "com_len" => $com_len[$i],
+                        "brod_no" => $brod_no[$i],
+                        "contract_num" => $contract_num[$i],
+                        "spots" => $spot_set[$i],
+                    ]);
+                } 
+            } catch (Throwable $e) {
+                rename($cp_file,public_path("error_files\\".$cps_file));
             }
+
             array_push($result, $cp);
             $cp = [];
         }
         return $result;
     }
 
+     private function re_index_spots($spots){
+        $spot_holder = [];
+        $current_cursor =  0;
+        $spots = array_values($spots); // reindex array
+        foreach ($spots as $key => $value) { // future enhancement, please optimize this algo
+            if(strstr($value, "VERSION")){
+                //35 -1 =  34 32  
+                $end_cursor =  $key;
+                array_push($spot_holder, array_slice($spots,$current_cursor,$end_cursor - $current_cursor));
+                $current_cursor =  $key + 1; // assuming the version has spots value to its front
+            }
+        }
+        return array_values(array_filter($spot_holder)) ;
+    }
+
     public function invoke_cp(Request $request){
+        $userdata = session("user_data");
+        $user_preview_format =  $userdata->preview_format;
+        if(!$user_preview_format){
+            $data =  $request->data;
+            foreach($data as $key1 => $data_set){
+                foreach($data_set as $key => $data_set_value){
+                    $spot_holder =  [];
+                    $spot_set = [];
+                    $spots = $data_set_value["spots"];
+                    for($i = 0; $i < sizeof($spots); $i++){
+                        if(!preg_match("/^[0-9]{2}:/", $spots[$i])){
+                            if($spot_set != null){
+                                array_push($spot_holder, array_chunk($spot_set,11));
+                            }
+                            $spot_set = [];
+                            array_push($spot_set, $spots[$i]);
+                            continue;
+                        }
+                        array_push($spot_set, $spots[$i]);
+                        if(($i) == array_key_last($spots)){
+
+                            array_push($spot_holder, array_chunk($spot_set,11));
+                        }
+
+                    }
+                    $data[$key1][$key]["spots"] = array_merge(...$spot_holder);
+                    // $data_set[$key]["spots"] = array_merge(...$spot_holder);
+                }
+            }
+            $request->data =  $data;
+        }
+        // dd($request->data);
+        ini_set('max_execution_time', '300');
+        ini_set("pcre.backtrack_limit", "5000000");
+        $userdata = session("user_data");
+        $username = $userdata->username;
         $data = $request->data;
-        $this->deleteAllfileDIR("cp_output");
+        $this->deleteAllfileDIR("cp_output/$username");
         $cps = $data;
-        $dir = public_path("cp");
-        $file = array_slice(scandir(public_path("cp")), 2); // for the file name puroses only
+        $dir = public_path("cp/$username");
+        $file = array_slice(scandir(public_path("cp/$username")), 2); // for the file name puroses only
         $pages = [];
         foreach ($cps as $cps_group_key => $cp_set) {  // FILES uploaded, it has many set of CP
            $pages_per_file_cp = [];
-           foreach ($cp_set as $cp_set_key => $cp) {  // SINGLE file cp , it has multiple monthly cp
-            // each pages should have advertiser, agency, month_year, station, ae, date, product, com_len, brod_no, contract_num, letter_of_codes. version
-                $per_page =  28; // each pages should only contain 26 rows of content / sentences
-                $spots =  $cp["spots"];
-                $spots_date_and_value = []; // contains the 8 sections spots
-                foreach ($spots as $spots_key => $spots_value) { // each date of spots, e.g. 1 09:40:09H || 2 11:40:09H || 5 01:40:09H
-                    $spots_to_render_perge = [];
-                    $spots_time_value = array_map(function($d){
-                        return implode("  ", $d);
-                    },array_chunk(explode("  ", $spots_value), 8)); // split array and make a group by 8, merge the group to make 1 spot value
-                    $spots_date_and_value[$spots_key] = $spots_time_value;
-                }
-
+            foreach ($cp_set as $cp_set_key => $cp) {  // SINGLE file cp , it has multiple monthly cp
+                $per_page =  39;
                 $header_details = array_diff_key($cp, array_flip(["spots", "version"])); // get all header details except spots
-                $spot_count = 1;
-                $spot_container = [];
-                foreach ($spots_date_and_value as $spots_date_and_value_key => $spots_date_and_value_value) {
-                    for($i = 0; $i < sizeof($spots_date_and_value_value); $i++){
-                        array_push($spot_container, [$spots_date_and_value_key => $spots_date_and_value_value[$i]]);
-                        //push all spot lines to $spot_container with spot date as Key value and content is all the value for that date of spot, chucked by 8
-                    }
-                }
-                $page = array_map(function($d) use ($header_details){
-                    return array_merge($header_details, ["spots" => $d]);// add the header_details here
-                }, array_chunk($spot_container, $per_page)); // chunk spots to 28 so  each cp page will have 30 spots
-                //** 86 character per row
+                $spot_holder = $cp["spots"];
+                $spots = array_filter(array_map(function($data){
+                    return (implode("  ", array_filter($data)));
+                },$spot_holder));
+
+                $page = array_map(function($data) use ($header_details){
+                    return array_merge($header_details, ["spots" => $data]);
+                },array_chunk($spots, $per_page));
+
                 $last_page_spot_rows = sizeof($page[array_key_last($page)]["spots"]); // get how may row of spot is in the last page
                 $cp_version = preg_replace('/\s\s+/', ' ', $cp["version"]);
-                $rows_for_cp_version = (int)ceil(strlen($cp_version) / 86); // get how may rows does a version need
-
+                $rows_for_cp_version = (int)ceil(strlen($cp_version) / 60); // get how may rows does a version need
                 if(($rows_for_cp_version + $last_page_spot_rows) >= $per_page){
                     // create last page here for the version
                     array_push($page, array_diff_key($page[array_key_last($page)], array_flip(["spots"])));
@@ -265,35 +355,59 @@ class GenerateController extends Controller
                     $page[array_key_last($page)]["version"] = $cp_version;
                 }else{
                     $page[array_key_last($page)]["version"] = $cp_version; // include the CP version in the last page of spot if $rows_for_cp_version + $last_page_spot_rows is not >= $per_page
-                    // dd($page[array_key_last($page)]);
                 }
-
                 $pages_per_file_cp = array_merge($pages_per_file_cp, $page);
-
-                // check the last index of page, add version for the page if it can accommodate
-           }
-           array_push($pages, $pages_per_file_cp);
+            }
+            array_push($pages, $pages_per_file_cp);
         }
 
 
         foreach ($pages as $key => $value) {
+            $userdata = session("user_data");
+            $username = $userdata->username;
             $data = [
                 "mbclogo" => asset('images/mbclogo.jpg'),
                 "kbplogo" => asset('images/kbplogo.jpg'),
-                "jenelle_sig" => asset('images/jenelle_sig.png'),
-                "vic_sig" => asset('images/vic_sig.png'),
+                "userdata" => $userdata,
                 "jen_sig" => asset('images/jen_sig.png'),
                 "pdf" => $value
             ];
+            // dd($data);
             $file_name = (string)rand(0,2000);
             $pdf = new \Mpdf\Mpdf(['format' => 'Letter']);
             $pdf->falseBoldWeight = 8;
             $pdf->useActiveForms = true;
             $html = view('welcome', ($data))->render();
             $pdf->WriteHTML($html);
-            $pdf->Output(public_path("cp_output\\") . "CPM_".$file[$key], \Mpdf\Output\Destination::FILE);
+            $pdf->Output(public_path("cp_output\\$username\\") . "CPM_".$file[$key], \Mpdf\Output\Destination::FILE);
+            // $pdf->Output('filename.pdf', 'I');
         }
 
     }
 
+    public function g_drive_upload(){
+        $userdata = session("user_data");
+        $username = $userdata->username;
+        $file = array_slice(scandir(public_path("cp_output/$username")), 2);
+        foreach($file as $data){
+            Storage::disk('google')->put($data,
+                File::get(public_path("cp_output\\$username\\$data"))
+            );
+        }
+        return "success";
+    }
+
+    public function set_preview_format(Request $request){
+        $data = $request->all();
+        session("user_data")->preview_format =  $data["flag"];
+    }
+
 }
+
+
+
+
+// Client ID = 686777601412-mfiksu27a8u8d3vjvrprv86p96a3saed.apps.googleusercontent.com
+// Client Secret = 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
+// Refresh Token = 1//04vVh5LRnrf-vCgYIARAAGAQSNgF-L9IrLKBEj3GiEmUm0u1liJP4gXX6S1XlcxKoid1yfTLTI9LbsVkpnpb7VLpt_AB79kROPQ
+// Access Token = ya29.a0AVvZVsqj8NPxWabvgzkSxm337ZHoY4-BCR1hW8VBBVAvBfDbPhLlJYB4tSCB5CgPU9TQhXz1VawVyI-W1XDzifhn6za5_AqizS3n1HH9q4Dc4goiAixTsNZ_mJEUKRmhPdZ-d_VCVv2E7fgI-W2Z2iGNbxwdH_waCgYKAYsSAQASFQGbdwaIZJUGwynZ4AyEMagVk2qvlQ0166
