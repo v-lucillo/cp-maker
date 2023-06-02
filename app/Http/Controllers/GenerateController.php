@@ -405,9 +405,3 @@ class GenerateController extends Controller
 }
 
 
-
-
-// Client ID = 686777601412-mfiksu27a8u8d3vjvrprv86p96a3saed.apps.googleusercontent.com
-// Client Secret = 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
-// Refresh Token = 1//04vVh5LRnrf-vCgYIARAAGAQSNgF-L9IrLKBEj3GiEmUm0u1liJP4gXX6S1XlcxKoid1yfTLTI9LbsVkpnpb7VLpt_AB79kROPQ
-// Access Token = ya29.a0AVvZVsqj8NPxWabvgzkSxm337ZHoY4-BCR1hW8VBBVAvBfDbPhLlJYB4tSCB5CgPU9TQhXz1VawVyI-W1XDzifhn6za5_AqizS3n1HH9q4Dc4goiAixTsNZ_mJEUKRmhPdZ-d_VCVv2E7fgI-W2Z2iGNbxwdH_waCgYKAYsSAQASFQGbdwaIZJUGwynZ4AyEMagVk2qvlQ0166
